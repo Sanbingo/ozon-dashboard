@@ -1,0 +1,7 @@
+data/*.db
+logs/
+__pycache__/
+*.bak
+*.bak2
+*.bak3
+config.py
