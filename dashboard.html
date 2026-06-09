@@ -41,6 +41,12 @@
     min-width: 120px;
   }
   .store-picker select:focus { outline: none; border-color: var(--accent); }
+  .btn-logout {
+    padding: 6px 14px; border-radius: 8px; border: 1px solid var(--border);
+    background: transparent; color: var(--muted); font-size: 13px;
+    cursor: pointer; transition: all .2s; white-space: nowrap;
+  }
+  .btn-logout:hover { background: rgba(255,82,82,.15); color: var(--red); border-color: var(--red); }
   .date-picker { display: flex; align-items: center; gap: 10px; }
   .date-picker label { color: var(--muted); font-size: 14px; }
   .date-picker select {
@@ -111,6 +117,7 @@
       <label>📅 日期</label>
       <select id="dateSelect" onchange="switchDate(this.value)"></select>
     </div>
+    <button class="btn-logout" onclick="doLogout()" title="退出登录">🚪 退出</button>
   </div>
 </div>
 <div class="cards" id="summaryCards"></div>
@@ -152,6 +159,15 @@ function pctChange(current, previous) {
   return (chg > 0 ? '\u2191' : '\u2193') + ' ' + Math.abs(chg).toFixed(1) + '%';
 }
 
+async function loadStores() {
+  try {
+    const stores = await fetch('/api/stores').then(r => r.json());
+    storeNames = stores;
+    renderStoreSelect();
+    loadStoreData(currentStore);
+  } catch(e) { console.error('Failed to load stores', e); }
+}
+
 function renderStoreSelect() {
   const sel = document.getElementById('storeSelect');
   sel.innerHTML = '';
@@ -162,15 +178,6 @@ function renderStoreSelect() {
     if (id === currentStore) opt.selected = true;
     sel.appendChild(opt);
   }
-}
-
-async function loadStores() {
-  try {
-    const stores = await fetch('/api/stores').then(r => r.json());
-    storeNames = stores;
-    renderStoreSelect();
-    loadStoreData(currentStore);
-  } catch(e) { console.error('Failed to load stores', e); }
 }
 
 async function switchStore(storeId) {
@@ -199,6 +206,28 @@ async function loadStoreData(store) {
   }
 }
 
+// ========== 登录/退出 ==========
+async function doLogout() {
+  if (!confirm('确认退出登录？')) return;
+  try {
+    await fetch('/api/logout', { method: 'POST' });
+    window.location.href = '/login';
+  } catch(e) {
+    window.location.href = '/login';
+  }
+}
+// 401时自动跳转登录
+const origFetch = window.fetch;
+window.fetch = function(url, opts) {
+  return origFetch.apply(this, arguments).then(resp => {
+    if (resp.status === 401) {
+      resp.clone().json().then(data => {
+        if (data.login) window.location.href = '/login';
+      }).catch(() => {});
+    }
+    return resp;
+  });
+};
 function loadAll() { loadStores(); }
 
 function populateDateSelect() {
