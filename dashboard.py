@@ -10,7 +10,7 @@ from urllib.parse import urlparse, parse_qs
 import os, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import store6_db
+import stores_db as sdb
 import config
 from dashboard_login import verify_login, create_session, validate_session, destroy_session, get_cookie_value
 
@@ -108,22 +108,28 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             return
 
         # 已认证 — 正常处理
+
+        # 总览 API（跨店铺聚合）
+        if path == '/api/overview':
+            self._json_response(self._get_overview())
+            return
+
         store = params.get('store', [DEFAULT_STORE])[0]
         if store not in STORES:
             self._json_response({'error': f'未知店铺: {store}', 'stores': STORES}, 400)
             return
 
         if path == '/api/summary':
-            self._json_response(store6_db.get_all_summary(store))
+            self._json_response(sdb.get_all_summary(store))
         elif path == '/api/dates':
-            mind, maxd = store6_db.get_date_range(store)
+            mind, maxd = sdb.get_date_range(store)
             self._json_response({'min_date': mind, 'max_date': maxd})
         elif path == '/api/sku':
             date = params.get('date', [None])[0]
             if not date:
                 self._send_error(400, '缺少 date 参数')
                 return
-            self._json_response(store6_db.get_sku_daily(store, date))
+            self._json_response(sdb.get_sku_daily(store, date))
         elif path == '/api/stores':
             self._json_response(STORES)
         elif path == '/api/session':
@@ -167,7 +173,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             token, expires_at = create_session(username)
             # 设置cookie，24h过期
             expires_gmt = time.strftime('%a, %d %b %Y %H:%M:%S GMT', time.gmtime(expires_at))
-            cookie_value = f'session={token}; Path=/; Expires={expires_gmt}; HttpOnly; Secure; SameSite=Lax'
+            cookie_value = f'session={token}; Path=/; Expires={expires_gmt}; HttpOnly; SameSite=Lax'
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Access-Control-Allow-Origin', '*')
@@ -184,9 +190,64 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         # 清除cookie
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
-        self.send_header('Set-Cookie', 'session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; Secure; SameSite=Lax')
+        self.send_header('Set-Cookie', 'session=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax')
         self.end_headers()
         self.wfile.write(json.dumps({'ok': True}).encode())
+
+    # ---- 总览数据 ----
+
+    def _get_overview(self):
+        """聚合所有店铺的最新数据"""
+        latest_date = None
+        stores_data = []
+
+        for sid in STORES:
+            summary = sdb.get_all_summary(sid)
+            if not summary:
+                continue
+            # 最新一天的数据
+            latest = summary[-1]
+            d = latest['date']
+            if latest_date is None or d > latest_date:
+                latest_date = d
+
+            stores_data.append({
+                'store_id': sid,
+                'name': STORES[sid],
+                'date': d,
+                'orders': latest.get('analytics_units', 0) or 0,
+                'revenue': latest.get('analytics_revenue', 0) or 0,
+                'ad_cost': latest.get('ad_total_cost', 0) or 0,
+                'ad_orders': latest.get('ad_total_orders', 0) or 0,
+                'ad_revenue': latest.get('ad_total_revenue', 0) or 0,
+            })
+
+        # 只保留最新日期的数据
+        if latest_date:
+            stores_data = [s for s in stores_data if s['date'] == latest_date]
+
+        # 聚合
+        total_orders = sum(s['orders'] for s in stores_data)
+        total_revenue = sum(s['revenue'] for s in stores_data)
+        total_ad_cost = sum(s['ad_cost'] for s in stores_data)
+        total_ad_orders = sum(s['ad_orders'] for s in stores_data)
+        ad_ratio = total_ad_cost / total_revenue * 100 if total_revenue > 0 else 0
+
+        # 给每个店铺计算占比
+        for s in stores_data:
+            s['revenue_pct'] = round(s['revenue'] / total_revenue * 100, 1) if total_revenue > 0 else 0
+            s['ad_ratio'] = round(s['ad_cost'] / s['revenue'] * 100, 2) if s['revenue'] > 0 else 0
+
+        return {
+            'date': latest_date,
+            'total_orders': total_orders,
+            'total_revenue': total_revenue,
+            'total_ad_cost': total_ad_cost,
+            'total_ad_orders': total_ad_orders,
+            'ad_ratio': round(ad_ratio, 2),
+            'store_count': len(stores_data),
+            'stores': stores_data,
+        }
 
     # ---- 页面渲染 ----
 
@@ -226,7 +287,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 if __name__ == '__main__':
     # 初始化所有店铺数据库
     for sid in STORES:
-        store6_db.init_db(sid)
+        sdb.init_db(sid)
 
     # 确保 login.html 存在
     login_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'login.html')
