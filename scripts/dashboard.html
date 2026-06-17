@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>📊 Ozon 多店铺数据总览</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1923;
+    --card: #1a2d3d;
+    --card-hover: #1f3547;
+    --accent: #ff8c00;
+    --green: #00c853;
+    --red: #ff5252;
+    --text: #e0e6ed;
+    --muted: #8899aa;
+    --border: #2a3f52;
+    --highlight: rgba(255,140,0,.15);
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 20px;
+    min-height: 100vh;
+  }
+  .header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 24px; flex-wrap: wrap; gap: 12px;
+  }
+  .header h1 { font-size: 24px; display: flex; align-items: center; gap: 10px; }
+  .header h1 span { color: var(--accent); }
+  .header-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .store-picker { display: flex; align-items: center; gap: 10px; }
+  .store-picker label { color: var(--muted); font-size: 14px; }
+  .store-picker select {
+    background: var(--card); color: var(--text); border: 1px solid var(--border);
+    padding: 8px 16px; border-radius: 8px; font-size: 14px; cursor: pointer;
+    min-width: 120px;
+  }
+  .store-picker select:focus { outline: none; border-color: var(--accent); }
+  .btn-logout {
+    padding: 6px 14px; border-radius: 8px; border: 1px solid var(--border);
+    background: transparent; color: var(--muted); font-size: 13px;
+    cursor: pointer; transition: all .2s; white-space: nowrap;
+  }
+  .btn-logout:hover { background: rgba(255,82,82,.15); color: var(--red); border-color: var(--red); }
+  .date-picker { display: flex; align-items: center; gap: 10px; }
+  .date-picker label { color: var(--muted); font-size: 14px; }
+  .date-picker select {
+    background: var(--card); color: var(--text); border: 1px solid var(--border);
+    padding: 8px 16px; border-radius: 8px; font-size: 14px; cursor: pointer;
+  }
+  .date-picker select:focus { outline: none; border-color: var(--accent); }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .card {
+    background: var(--card); border-radius: 12px; padding: 18px 20px;
+    border: 1px solid var(--border); transition: all .2s;
+  }
+  .card:hover { background: var(--card-hover); }
+  .card .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+  .card .value { font-size: 26px; font-weight: 700; margin-top: 4px; }
+  .card .sub { font-size: 13px; color: var(--muted); margin-top: 2px; }
+  .card .accent { color: var(--accent); }
+  .card .green { color: var(--green); }
+  .card .red { color: var(--red); }
+
+  .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+  @media (max-width: 800px) { .charts { grid-template-columns: 1fr; } }
+  .chart-box {
+    background: var(--card); border-radius: 12px; padding: 20px;
+    border: 1px solid var(--border);
+  }
+  .chart-box h3 { font-size: 14px; color: var(--muted); margin-bottom: 12px; }
+  .chart-box canvas { max-height: 280px; }
+
+  .tabs { display: flex; gap: 4px; margin-bottom: 16px; }
+  .tab {
+    padding: 8px 20px; border-radius: 8px 8px 0 0; cursor: pointer;
+    background: var(--card); border: 1px solid var(--border); border-bottom: 0;
+    color: var(--muted); font-size: 14px; transition: all .2s;
+  }
+  .tab.active { background: var(--card-hover); color: var(--text); border-color: var(--accent); }
+  .tab:hover { background: var(--card-hover); }
+
+  .table-wrap {
+    background: var(--card); border-radius: 12px; padding: 0;
+    border: 1px solid var(--border); overflow: hidden;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead { background: #1f3547; }
+  th { padding: 12px 16px; text-align: left; font-weight: 600; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .3px; }
+  td { padding: 10px 16px; border-top: 1px solid rgba(255,255,255,.04); }
+  tr:hover td { background: rgba(255,255,255,.02); }
+  .num { text-align: right; font-family: 'SF Mono', 'Menlo', monospace; }
+  .pct { color: var(--muted); }
+  .loading { padding: 20px; text-align: center; color: var(--muted); font-size: 14px; }
+  .highlight-row td { background: var(--highlight); }
+
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+  .tag-ad { background: rgba(79,195,247,.15); color: #4fc3f7; }
+  .tag-org { background: rgba(102,187,106,.15); color: #66bb6a; }
+
+  .footer { text-align: center; margin-top: 30px; padding: 16px 0; font-size: 12px; color: #2a3f52; border-top: 1px solid var(--border); }
+
+  /* 总览专用 */
+  .overview-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 28px; }
+  @media (max-width: 700px) { .overview-cards { grid-template-columns: repeat(2, 1fr); } }
+  .overview-cards .card { text-align: center; }
+  .overview-cards .card .big { font-size: 34px; font-weight: 700; margin-top: 4px; }
+  .overview-cards .card .big.accent { color: var(--accent); }
+  .overview-cards .card .big.green { color: var(--green); }
+  .overview-cards .card .big.red { color: var(--red); }
+
+  .store-table-wrap {
+    background: var(--card); border-radius: 12px; border: 1px solid var(--border); overflow: hidden; margin-bottom: 24px;
+  }
+  .store-table-wrap h3 { padding: 16px 20px 0; font-size: 14px; color: var(--muted); }
+  .store-table-wrap table { font-size: 14px; }
+  .store-table-wrap td:first-child { font-weight: 600; }
+
+  .bar-cell { display: flex; align-items: center; gap: 8px; }
+  .bar-bg { flex: 1; height: 6px; background: rgba(255,255,255,.06); border-radius: 3px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--accent), #ffb432); }
+  .bar-fill.green { background: linear-gradient(90deg, var(--green), #69f0ae); }
+  .bar-fill.red { background: linear-gradient(90deg, var(--red), #ff8a80); }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>🧡 <span id="storeTitle">多店铺数据总览</span></h1>
+  <div class="header-controls">
+    <div class="store-picker">
+      <label>🏪 店铺</label>
+      <select id="storeSelect" onchange="switchStore(this.value)">
+        <option value="overview">📊 总览</option>
+      </select>
+    </div>
+    <div class="date-picker" id="dateArea">
+      <label>📅 日期</label>
+      <select id="dateSelect" onchange="switchDate(this.value)"></select>
+    </div>
+    <button class="btn-logout" onclick="doLogout()" title="退出登录">🚪 退出</button>
+  </div>
+</div>
+
+<!-- 总览区域 -->
+<div id="overviewArea" style="display:block;">
+  <div class="overview-cards" id="overviewCards"></div>
+  <div class="store-table-wrap" id="overviewStoreTable"></div>
+</div>
+
+<!-- 单店区域 -->
+<div id="storeArea" style="display:none;">
+  <div class="cards" id="summaryCards"></div>
+  <div class="charts">
+    <div class="chart-box"><h3>📈 销售趋势</h3><canvas id="revenueChart"></canvas></div>
+    <div class="chart-box"><h3>📊 推广分析</h3><canvas id="adChart"></canvas></div>
+  </div>
+  <div class="tabs" id="tabBar">
+    <div class="tab active" id="tabSku" onclick="switchTab('sku')">📦 商品明细</div>
+    <div class="tab" id="tabCamp" onclick="switchTab('camp')">📢 推广商品</div>
+    <div class="tab" id="tabTrend" onclick="switchTab('trend')">📈 趋势表</div>
+  </div>
+  <div class="table-wrap" id="tableContainer"><div class="loading">选择日期查看数据</div></div>
+</div>
+
+<div class="footer">🔄 数据每日 08:40 自动更新 · 由小O 🧡 自动维护</div>
+
+<script>
+const allData = { summary: [], sku: [], campaigns: [], dates: [] };
+let charts = { revenue: null, ad: null };
+let selectedDate = null;
+let currentTab = 'sku';
+let currentStore = 'overview';
+let storeNames = {};
+
+function getSummaryByDate(date) {
+  return allData.summary.find(d => d.date === date) || null;
+}
+function getPrevSummaryByDate(date) {
+  const prev = allData.summary.filter(d => d.date < date);
+  return prev.length > 0 ? prev[prev.length - 1] : null;
+}
+function pctChange(current, previous) {
+  if (previous === undefined || previous === null || previous === 0) return '-';
+  const chg = ((current - previous) / previous * 100);
+  return (chg > 0 ? '\u2191' : '\u2193') + ' ' + Math.abs(chg).toFixed(1) + '%';
+}
+
+async function loadStores() {
+  try {
+    const stores = await fetch('/api/stores').then(r => r.json());
+    storeNames = stores;
+    renderStoreSelect();
+    loadStoreData(currentStore);
+  } catch(e) { console.error('Failed to load stores', e); }
+}
+
+function renderStoreSelect() {
+  const sel = document.getElementById('storeSelect');
+  sel.innerHTML = '<option value="overview">📊 总览</option>';
+  for (const [id, name] of Object.entries(storeNames)) {
+    const opt = document.createElement('option');
+    opt.value = id; opt.textContent = name;
+    if (id === currentStore) opt.selected = true;
+    sel.appendChild(opt);
+  }
+}
+
+async function switchStore(storeId) {
+  currentStore = storeId;
+  document.getElementById('storeSelect').value = storeId;
+  const isOverview = storeId === 'overview';
+  document.getElementById('storeTitle').textContent = isOverview ? '多店铺数据总览' : (storeNames[storeId] || storeId + ' 数据日报');
+  document.getElementById('overviewArea').style.display = isOverview ? 'block' : 'none';
+  document.getElementById('storeArea').style.display = isOverview ? 'none' : 'block';
+  if (!isOverview) {
+    document.getElementById('storeArea').style.display = 'block';
+  }
+  loadStoreData(storeId);
+}
+
+async function loadStoreData(store) {
+  if (store === 'overview') { loadOverview(); return; }
+  document.getElementById('summaryCards').innerHTML = '<div class="card"><div class="label">🔄</div><div class="value">切换店铺中...</div><div class="sub">加载 ' + (storeNames[store] || store) + ' 数据</div></div>';
+  try {
+    const [summary, dates] = await Promise.all([
+      fetch('/api/summary?store=' + store).then(r=>r.json()),
+      fetch('/api/dates?store=' + store).then(r=>r.json()),
+    ]);
+    allData.summary = summary;
+    allData.dates = dates;
+    populateDateSelect();
+    const sorted = [...summary].sort((a,b) => b.date.localeCompare(a.date));
+    selectedDate = sorted.length > 0 ? sorted[0].date : null;
+    if (selectedDate) document.getElementById('dateSelect').value = selectedDate;
+    render();
+  } catch(e) {
+    document.getElementById('summaryCards').innerHTML = '<div class="card"><div class="label">⚠️</div><div class="value red">数据加载失败</div><div class="sub">' + e.message + '</div></div>';
+  }
+}
+
+// ========== 总览 ==========
+
+async function loadOverview() {
+  document.getElementById('overviewCards').innerHTML = '<div class="card"><div class="label">🔄</div><div class="value" style="font-size:18px;">加载中...</div></div>';
+  document.getElementById('overviewStoreTable').innerHTML = '';
+  try {
+    const data = await fetch('/api/overview').then(r => r.json());
+    renderOverview(data);
+  } catch(e) {
+    document.getElementById('overviewCards').innerHTML = '<div class="card"><div class="label">⚠️</div><div class="value red" style="font-size:18px;">加载失败</div><div class="sub">' + e.message + '</div></div>';
+  }
+}
+
+function renderOverview(data) {
+  const d = data.date ? data.date : '暂无数据';
+  const adRatio = data.ad_ratio ? data.ad_ratio.toFixed(2) + '%' : '-';
+  const revPerStore = data.total_revenue > 0 ? Math.round(data.total_revenue / (data.store_count || 1)).toLocaleString() : 0;
+  document.getElementById('overviewCards').innerHTML =
+    '<div class="card"><div class="label">📅 数据日期</div><div class="big">' + d + '</div><div class="sub">' + data.store_count + ' 个店铺</div></div>' +
+    '<div class="card"><div class="label">📦 总订单金额</div><div class="big accent">' + data.total_revenue.toLocaleString() + ' ₽</div><div class="sub">店均 ' + revPerStore + ' ₽</div></div>' +
+    '<div class="card"><div class="label">📦 总下单件数</div><div class="big green">' + data.total_orders.toLocaleString() + ' 件</div><div class="sub">推广订单 ' + data.total_ad_orders.toLocaleString() + ' 单</div></div>' +
+    '<div class="card"><div class="label">📢 总推广费</div><div class="big red">' + data.total_ad_cost.toLocaleString() + ' ₽</div><div class="sub">占总销售额 ' + adRatio + '</div></div>';
+
+  // 店铺对比表
+  const stores = data.stores || [];
+  if (!stores.length) {
+    document.getElementById('overviewStoreTable').innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted);">暂无店铺数据</div>';
+    return;
+  }
+
+  const maxRev = Math.max(...stores.map(s => s.revenue));
+  const maxAdCost = Math.max(...stores.map(s => s.ad_cost));
+  let html = '<h3>📋 各店铺数据对比</h3><table><thead><tr>' +
+    '<th>店铺</th><th class="num">订单金额</th><th class="num">件数</th><th class="num">推广费</th><th class="num">占比</th><th class="num">销售额占比</th>' +
+    '</tr></thead><tbody>';
+  for (const s of stores) {
+    const revBar = (s.revenue / maxRev * 100).toFixed(0);
+    const adBar = maxAdCost > 0 ? (s.ad_cost / maxAdCost * 100).toFixed(0) : 0;
+    const adPct = s.ad_ratio > 0 ? s.ad_ratio.toFixed(2) + '%' : '—';
+    html += '<tr>' +
+      '<td>' + s.name + '</td>' +
+      '<td class="num"><div class="bar-cell">' + s.revenue.toLocaleString() + ' ₽<div class="bar-bg"><div class="bar-fill" style="width:' + revBar + '%"></div></div></div></td>' +
+      '<td class="num">' + s.orders.toLocaleString() + '</td>' +
+      '<td class="num"><div class="bar-cell">' + s.ad_cost.toLocaleString() + ' ₽<div class="bar-bg"><div class="bar-fill red" style="width:' + adBar + '%"></div></div></div></td>' +
+      '<td class="num pct">' + adPct + '</td>' +
+      '<td class="num pct">' + (s.revenue_pct || 0) + '%</td>' +
+      '</tr>';
+  }
+  html += '</tbody></table>';
+  document.getElementById('overviewStoreTable').innerHTML = html;
+}
+
+// ========== 登录/退出 ==========
+
+async function doLogout() {
+  if (!confirm('确认退出登录？')) return;
+  try { await fetch('/api/logout', { method: 'POST' }); } catch(e) {}
+  window.location.href = '/login';
+}
+const origFetch = window.fetch;
+window.fetch = function(url, opts) {
+  return origFetch.apply(this, arguments).then(resp => {
+    if (resp.status === 401) {
+      resp.clone().json().then(data => { if (data.login) window.location.href = '/login'; }).catch(() => {});
+    }
+    return resp;
+  });
+};
+function loadAll() { loadStores(); }
+
+function populateDateSelect() {
+  const sel = document.getElementById('dateSelect');
+  const sorted = [...allData.summary].sort((a,b) => b.date.localeCompare(a.date));
+  sel.innerHTML = '';
+  for (const d of sorted) {
+    const opt = document.createElement('option');
+    opt.value = d.date; opt.textContent = d.date;
+    sel.appendChild(opt);
+  }
+}
+
+function render() {
+  renderCards();
+  renderTrendChart();
+  renderAdChart();
+  loadTabContent(currentTab);
+}
+
+function renderCards() {
+  if (!selectedDate || !allData.summary.length) {
+    document.getElementById('summaryCards').innerHTML = '<div class="card"><div class="label">📭</div><div class="value">暂无数据</div><div class="sub">等待首次日报执行</div></div>';
+    return;
+  }
+  const entry = getSummaryByDate(selectedDate);
+  if (!entry) { document.getElementById('summaryCards').innerHTML = '<div class="card"><div class="label">⚠️</div><div class="value">该日期无数据</div></div>'; return; }
+  const prev = getPrevSummaryByDate(selectedDate);
+  const revChg = pctChange(entry.analytics_revenue || 0, prev ? prev.analytics_revenue : null);
+  const unitChg = pctChange(entry.analytics_units || 0, prev ? prev.analytics_units : null);
+  const adRate = entry.analytics_revenue > 0 ? (entry.ad_total_cost / entry.analytics_revenue * 100).toFixed(2) : '-';
+  document.getElementById('summaryCards').innerHTML =
+    '<div class="card"><div class="label">📅 日期</div><div class="value">' + entry.date + '</div><div class="sub">' + (prev ? '<- 前日 ' + prev.date : '首日') + '</div></div>' +
+    '<div class="card"><div class="label">📦 订单金额</div><div class="value accent">' + (entry.analytics_revenue||0).toLocaleString() + ' ₽</div><div class="sub">较前日 ' + revChg + '</div></div>' +
+    '<div class="card"><div class="label">📦 下单件数</div><div class="value green">' + (entry.analytics_units||0).toLocaleString() + ' 件</div><div class="sub">较前日 ' + unitChg + '</div></div>' +
+    '<div class="card"><div class="label">📢 推广费</div><div class="value red">' + (entry.ad_total_cost||0).toLocaleString() + ' ₽</div><div class="sub">占销售额 ' + adRate + '%</div></div>' +
+    '<div class="card"><div class="label">📢 推广订单</div><div class="value">' + (entry.ad_total_orders||0).toLocaleString() + ' 单</div><div class="sub">推广 SKU ' + (entry.ad_sku_count||0) + ' 个</div></div>';
+}
+
+function renderTrendChart() {
+  const ds = allData.summary;
+  if (!ds.length) return;
+  const labels = ds.map(d => d.date);
+  const rev = ds.map(d => d.analytics_revenue || 0);
+  const units = ds.map(d => d.analytics_units || 0);
+  const revColors = ds.map(d => d.date === selectedDate ? 'rgba(255,180,50,.95)' : 'rgba(255,140,0,.65)');
+  const unitColors = ds.map(d => d.date === selectedDate ? 'rgba(0,230,100,.95)' : 'rgba(0,200,83,.55)');
+  const ctx = document.getElementById('revenueChart').getContext('2d');
+  if (charts.revenue) charts.revenue.destroy();
+  charts.revenue = new Chart(ctx, { type: 'bar', data: { labels, datasets: [
+    { label: '订单金额 (₽)', data: rev, backgroundColor: revColors, borderRadius: 4, yAxisID: 'y', borderColor: ds.map(d => d.date === selectedDate ? '#ffb432' : 'transparent'), borderWidth: ds.map(d => d.date === selectedDate ? 2 : 0) },
+    { label: '件数', data: units, backgroundColor: unitColors, borderRadius: 4, yAxisID: 'y1', borderColor: ds.map(d => d.date === selectedDate ? '#00e664' : 'transparent'), borderWidth: ds.map(d => d.date === selectedDate ? 2 : 0) },
+  ]}, options: {
+    responsive: true, maintainAspectRatio: false,
+    onClick: (e, elements) => { if (elements.length > 0) { const date = labels[elements[0].index]; document.getElementById('dateSelect').value = date; switchDate(date); } },
+    plugins: { legend: { labels: { color: '#8899aa' } }, tooltip: { callbacks: { afterBody: (items) => items[0].label === selectedDate ? '<- 当前选中' : '点击可切换到该日期' } } },
+    scales: { x: { ticks: { color: '#8899aa' }, grid: { color: 'rgba(255,255,255,.05)' } }, y: { position: 'left', ticks: { color: '#ff8c00', callback: v => v.toLocaleString() }, grid: { color: 'rgba(255,255,255,.05)' } }, y1: { position: 'right', ticks: { color: '#00c853' }, grid: { display: false } } }
+  }});
+}
+
+function renderAdChart() {
+  const ds = allData.summary;
+  if (!ds.length) return;
+  const labels = ds.map(d => d.date);
+  const cost = ds.map(d => d.ad_total_cost || 0);
+  const rev = ds.map(d => d.ad_total_revenue || 0);
+  const roas = ds.map(d => d.ad_total_cost > 0 ? +(d.ad_total_revenue / d.ad_total_cost).toFixed(2) : 0);
+  const pointRadii = ds.map(d => d.date === selectedDate ? 8 : 3);
+  const pointColors = ds.map(d => d.date === selectedDate ? '#fff' : undefined);
+  const ctx = document.getElementById('adChart').getContext('2d');
+  if (charts.ad) charts.ad.destroy();
+  charts.ad = new Chart(ctx, { type: 'line', data: { labels, datasets: [
+    { label: '推广费 (₽)', data: cost, borderColor: '#ff5252', backgroundColor: 'rgba(255,82,82,.1)', fill: true, tension: .3, pointRadius: pointRadii, pointBackgroundColor: pointColors, pointBorderColor: '#ff5252', pointBorderWidth: 2, yAxisID: 'y' },
+    { label: '广告订单额 (₽)', data: rev, borderColor: '#ff8c00', backgroundColor: 'rgba(255,140,0,.1)', fill: true, tension: .3, pointRadius: pointRadii, pointBackgroundColor: pointColors, pointBorderColor: '#ff8c00', pointBorderWidth: 2, yAxisID: 'y' },
+    { label: 'ROAS', data: roas, borderColor: '#00c853', borderDash: [4,4], tension: .3, pointRadius: pointRadii, pointBackgroundColor: pointColors, pointBorderColor: '#00c853', pointBorderWidth: 2, yAxisID: 'y1' },
+  ]}, options: {
+    responsive: true, maintainAspectRatio: false,
+    onClick: (e, elements) => { if (elements.length > 0) { const date = labels[elements[0].index]; document.getElementById('dateSelect').value = date; switchDate(date); } },
+    plugins: { legend: { labels: { color: '#8899aa' } }, tooltip: { callbacks: { afterBody: (items) => items[0].label === selectedDate ? '<- 当前选中' : '点击可切换到该日期' } } },
+    scales: { x: { ticks: { color: '#8899aa' }, grid: { color: 'rgba(255,255,255,.05)' } }, y: { position: 'left', ticks: { color: '#ff8c00', callback: v => v.toLocaleString() }, grid: { color: 'rgba(255,255,255,.05)' } }, y1: { position: 'right', ticks: { color: '#00c853' }, grid: { display: false } } }
+  }});
+}
+
+function switchTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  const tabId = 'tab' + tab.charAt(0).toUpperCase() + tab.slice(1);
+  const el = document.getElementById(tabId);
+  if (el) el.classList.add('active');
+  loadTabContent(tab);
+}
+
+async function loadTabContent(tab) {
+  const container = document.getElementById('tableContainer');
+  container.innerHTML = '<div class="loading">加载中...</div>';
+  if (tab === 'sku') await loadSkuTable();
+  else if (tab === 'camp') await loadCampTable();
+  else renderTrendTable();
+}
+
+async function loadSkuTable() {
+  if (!selectedDate) { document.getElementById('tableContainer').innerHTML = '<div class="loading">请先选择日期</div>'; return; }
+  try {
+    const data = await fetch('/api/sku?store=' + currentStore + '&date=' + selectedDate).then(r=>r.json());
+    if (!data.length) { document.getElementById('tableContainer').innerHTML = '<div class="loading">该日期暂无商品明细数据</div>'; return; }
+    let html = '<table><thead><tr><th>#</th><th>商品名</th><th class="num">单数</th><th class="num">件数</th><th class="num">销售金额</th><th class="num">推广费</th><th class="num">占比</th><th>类型</th></tr></thead><tbody>';
+    data.forEach((d, i) => {
+      const pct = d.ad_pct > 0 ? d.ad_pct.toFixed(1) + '%' : '—';
+      const ac = d.ad_cost > 0 ? d.ad_cost.toLocaleString() + ' ₽' : '—';
+      const tag = d.is_ad ? '<span class="tag tag-ad">📢 推广</span>' : '<span class="tag tag-org">自然</span>';
+      html += '<tr><td>' + (i+1) + '</td><td>' + (d.name || '?') + '</td><td class="num">' + d.orders + '</td><td class="num">' + d.units + '</td><td class="num">' + d.revenue.toLocaleString() + ' ₽</td><td class="num">' + ac + '</td><td class="num pct">' + pct + '</td><td>' + tag + '</td></tr>';
+    });
+    html += '</tbody></table>';
+    document.getElementById('tableContainer').innerHTML = html;
+  } catch(e) { document.getElementById('tableContainer').innerHTML = '<div class="loading">加载失败: ' + e.message + '</div>'; }
+}
+
+async function loadCampTable() {
+  if (!selectedDate) return;
+  try {
+    const data = await fetch('/api/sku?store=' + currentStore + '&date=' + selectedDate).then(r=>r.json());
+    const adItems = data.filter(d => d.is_ad);
+    const adCost = adItems.reduce((s, d) => s + d.ad_cost, 0);
+    const totalRev = data.reduce((s, d) => s + d.revenue, 0);
+    if (!adItems.length) { document.getElementById('tableContainer').innerHTML = '<div class="loading">该日期暂无推广数据</div>'; return; }
+    let html = '<table><thead><tr><th>#</th><th>商品名</th><th class="num">单数</th><th class="num">件数</th><th class="num">销售额</th><th class="num">推广费</th><th class="num">费占比</th></tr></thead><tbody>';
+    [...adItems].sort((a,b) => b.ad_cost - a.ad_cost).forEach((d, i) => {
+      html += '<tr><td>' + (i+1) + '</td><td>' + (d.name || '?') + '</td><td class="num">' + d.orders + '</td><td class="num">' + d.units + '</td><td class="num">' + d.revenue.toLocaleString() + ' ₽</td><td class="num">' + d.ad_cost.toLocaleString() + ' ₽</td><td class="num pct">' + d.ad_pct.toFixed(1) + '%</td></tr>';
+    });
+    html += '</tbody></table><div style="padding:12px 16px;border-top:1px solid var(--border);font-size:13px;color:var(--muted);">推广 SKU ' + adItems.length + ' 个 · 推广费 ' + adCost.toLocaleString() + ' ₽ · 占销售额 ' + (totalRev > 0 ? (adCost/totalRev*100).toFixed(2) : 0) + '%</div>';
+    document.getElementById('tableContainer').innerHTML = html;
+  } catch(e) { document.getElementById('tableContainer').innerHTML = '<div class="loading">加载失败: ' + e.message + '</div>'; }
+}
+
+function renderTrendTable() {
+  const ds = allData.summary;
+  if (!ds.length) { document.getElementById('tableContainer').innerHTML = '<div class="loading">暂无数据</div>'; return; }
+  const sorted = [...ds].sort((a,b) => b.date.localeCompare(a.date));
+  let html = '<table><thead><tr><th>日期</th><th class="num">订单金额</th><th class="num">件数</th><th class="num">推广费</th><th class="num">推广占比</th><th class="num">推广SKU</th><th class="num">ROAS</th></tr></thead><tbody>';
+  for (const d of sorted) {
+    const adPct = d.analytics_revenue > 0 ? (d.ad_total_cost/d.analytics_revenue*100).toFixed(2) + '%' : '-';
+    const roas = d.ad_total_cost > 0 ? (d.ad_total_revenue/d.ad_total_cost).toFixed(2) : '-';
+    html += '<tr' + (d.date === selectedDate ? ' class="highlight-row"' : '') + '><td>' + d.date + '</td><td class="num">' + (d.analytics_revenue||0).toLocaleString() + ' ₽</td><td class="num">' + (d.analytics_units||0).toLocaleString() + '</td><td class="num">' + (d.ad_total_cost||0).toLocaleString() + ' ₽</td><td class="num pct">' + adPct + '</td><td class="num">' + (d.ad_sku_count||0) + '</td><td class="num">' + roas + '</td></tr>';
+  }
+  html += '</tbody></table>';
+  document.getElementById('tableContainer').innerHTML = html;
+}
+
+function switchDate(date) {
+  selectedDate = date;
+  renderCards();
+  renderTrendChart();
+  renderAdChart();
+  loadTabContent(currentTab);
+}
+loadAll();
+</script>
+</body>
+</html>
