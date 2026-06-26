@@ -150,6 +150,10 @@
 <div id="overviewArea" style="display:block;">
   <div class="overview-cards" id="overviewCards"></div>
   <div class="store-table-wrap" id="overviewStoreTable"></div>
+  <div class="store-table-wrap" id="overviewTrendSection" style="padding:20px;display:none;">
+    <h3 style="padding:0 0 12px;font-size:14px;color:var(--muted);">📈 总订单金额每日趋势</h3>
+    <canvas id="overviewTrendChart" style="max-height:300px;"></canvas>
+  </div>
 </div>
 
 <!-- 单店区域 -->
@@ -171,7 +175,7 @@
 
 <script>
 const allData = { summary: [], sku: [], campaigns: [], dates: [] };
-let charts = { revenue: null, ad: null };
+let charts = { revenue: null, ad: null, overviewTrend: null };
 let selectedDate = null;
 let currentTab = 'sku';
 let currentStore = 'overview';
@@ -250,10 +254,36 @@ async function loadStoreData(store) {
 async function loadOverview() {
   document.getElementById('overviewCards').innerHTML = '<div class="card"><div class="label">🔄</div><div class="value" style="font-size:18px;">加载中...</div></div>';
   document.getElementById('overviewStoreTable').innerHTML = '';
+  document.getElementById('overviewTrendSection').style.display = 'none';
   try {
-    const data = await fetch('/api/overview').then(r => r.json());
-    allData.overviewData = data;
-    renderOverview(data);
+    // 先加载趋势数据获取所有可用日期
+    const trendResp = await fetch('/api/overview/trend');
+    if (!trendResp.ok) throw new Error('趋势数据加载失败');
+    const trendData = await trendResp.json();
+    allData.overviewTrendData = trendData;
+
+    // 填充日期选择器
+    const sel = document.getElementById('dateSelect');
+    sel.innerHTML = '';
+    for (const d of trendData) {
+      const opt = document.createElement('option');
+      opt.value = d.date;
+      opt.textContent = d.date;
+      sel.appendChild(opt);
+    }
+
+    // 默认选中最新日期
+    selectedDate = trendData.length > 0 ? trendData[trendData.length - 1].date : null;
+    if (selectedDate) {
+      // 获取当日总览数据
+      const data = await fetch('/api/overview?date=' + selectedDate).then(r => r.json());
+      allData.overviewData = data;
+      renderOverview(data);
+      renderOverviewTrendChart(trendData);
+      document.getElementById('dateSelect').value = selectedDate;
+    } else {
+      document.getElementById('overviewCards').innerHTML = '<div class="card"><div class="label">📭</div><div class="value">暂无数据</div></div>';
+    }
   } catch(e) {
     document.getElementById('overviewCards').innerHTML = '<div class="card"><div class="label">⚠️</div><div class="value red" style="font-size:18px;">加载失败</div><div class="sub">' + e.message + '</div></div>';
   }
@@ -326,6 +356,79 @@ function toggleSort(key) {
     overviewSortDir = 1;
   }
   renderOverview(allData.overviewData);
+}
+
+function renderOverviewTrendChart(trendData) {
+  const container = document.getElementById('overviewTrendSection');
+  if (!trendData || trendData.length < 2) {
+    container.style.display = 'none';
+    return;
+  }
+  container.style.display = 'block';
+
+  const labels = trendData.map(d => d.date);
+  const rev = trendData.map(d => d.total_revenue);
+  const orders = trendData.map(d => d.total_orders);
+
+  // 高亮选中日期
+  const revColors = trendData.map(d => d.date === selectedDate ? 'rgba(255,180,50,.95)' : 'rgba(255,140,0,.65)');
+  const orderColors = trendData.map(d => d.date === selectedDate ? 'rgba(0,230,100,.95)' : 'rgba(0,200,83,.55)');
+
+  const ctx = document.getElementById('overviewTrendChart').getContext('2d');
+  if (charts.overviewTrend) charts.overviewTrend.destroy();
+
+  charts.overviewTrend = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: '总订单金额 (₽)',
+          data: rev,
+          backgroundColor: revColors,
+          borderRadius: 4,
+          yAxisID: 'y',
+          borderColor: trendData.map(d => d.date === selectedDate ? '#ffb432' : 'transparent'),
+          borderWidth: trendData.map(d => d.date === selectedDate ? 2 : 0),
+        },
+        {
+          label: '总下单件数',
+          data: orders,
+          backgroundColor: orderColors,
+          borderRadius: 4,
+          yAxisID: 'y1',
+        },
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      onClick: (e, elements) => {
+        if (elements.length > 0) {
+          const date = labels[elements[0].index];
+          document.getElementById('dateSelect').value = date;
+          switchDate(date);
+        }
+      },
+      plugins: {
+        legend: { labels: { color: '#8899aa' } },
+        tooltip: {
+          callbacks: {
+            afterBody: (items) => items[0].label === selectedDate ? '<- 当前选中' : '点击切换日期',
+            label: function(context) {
+              if (context.datasetIndex === 0) return '订单金额: ' + context.parsed.y.toLocaleString() + ' ₽';
+              return '件数: ' + context.parsed.y.toLocaleString();
+            }
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { color: '#8899aa' }, grid: { color: 'rgba(255,255,255,.05)' } },
+        y: { position: 'left', ticks: { color: '#ff8c00', callback: v => v.toLocaleString() }, grid: { color: 'rgba(255,255,255,.05)' } },
+        y1: { position: 'right', ticks: { color: '#00c853' }, grid: { display: false } }
+      }
+    }
+  });
 }
 
 // ========== 登录/退出 ==========
@@ -494,10 +597,25 @@ function renderTrendTable() {
 
 function switchDate(date) {
   selectedDate = date;
-  renderCards();
-  renderTrendChart();
-  renderAdChart();
-  loadTabContent(currentTab);
+  if (currentStore === 'overview') {
+    loadOverviewForDate(date);
+  } else {
+    renderCards();
+    renderTrendChart();
+    renderAdChart();
+    loadTabContent(currentTab);
+  }
+}
+
+async function loadOverviewForDate(date) {
+  document.getElementById('overviewCards').innerHTML = '<div class="card"><div class="label">🔄</div><div class="value" style="font-size:18px;">切换日期...</div></div>';
+  try {
+    const data = await fetch('/api/overview?date=' + date).then(r => r.json());
+    allData.overviewData = data;
+    renderOverview(data);
+  } catch(e) {
+    document.getElementById('overviewCards').innerHTML = '<div class="card"><div class="label">⚠️</div><div class="value red" style="font-size:18px;">加载失败</div><div class="sub">' + e.message + '</div></div>';
+  }
 }
 loadAll();
 </script>

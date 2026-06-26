@@ -110,8 +110,12 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         # 已认证 — 正常处理
 
         # 总览 API（跨店铺聚合）
+        if path == '/api/overview/trend':
+            self._json_response(self._get_overview_trend())
+            return
         if path == '/api/overview':
-            self._json_response(self._get_overview())
+            date = params.get('date', [None])[0]
+            self._json_response(self._get_overview(date))
             return
 
         store = params.get('store', [DEFAULT_STORE])[0]
@@ -196,8 +200,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
 
     # ---- 总览数据 ----
 
-    def _get_overview(self):
-        """聚合所有店铺的最新数据"""
+    def _get_overview(self, target_date=None):
+        """聚合所有店铺的最新数据，或指定日期的数据"""
         latest_date = None
         stores_data = []
 
@@ -205,9 +209,16 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             summary = sdb.get_all_summary(sid)
             if not summary:
                 continue
-            # 最新一天的数据
-            latest = summary[-1]
-            d = latest['date']
+
+            if target_date:
+                entries = [s for s in summary if s['date'] == target_date]
+                if not entries:
+                    continue
+                entry = entries[0]
+            else:
+                entry = summary[-1]
+
+            d = entry['date']
             if latest_date is None or d > latest_date:
                 latest_date = d
 
@@ -215,11 +226,11 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 'store_id': sid,
                 'name': STORES[sid],
                 'date': d,
-                'orders': latest.get('analytics_units', 0) or 0,
-                'revenue': latest.get('analytics_revenue', 0) or 0,
-                'ad_cost': latest.get('ad_total_cost', 0) or 0,
-                'ad_orders': latest.get('ad_total_orders', 0) or 0,
-                'ad_revenue': latest.get('ad_total_revenue', 0) or 0,
+                'orders': entry.get('analytics_units', 0) or 0,
+                'revenue': entry.get('analytics_revenue', 0) or 0,
+                'ad_cost': entry.get('ad_total_cost', 0) or 0,
+                'ad_orders': entry.get('ad_total_orders', 0) or 0,
+                'ad_revenue': entry.get('ad_total_revenue', 0) or 0,
             })
 
         # 只保留最新日期的数据
@@ -248,6 +259,30 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             'store_count': len(stores_data),
             'stores': stores_data,
         }
+
+    def _get_overview_trend(self):
+        """每日跨店铺聚合趋势数据"""
+        from collections import defaultdict
+        daily = defaultdict(lambda: {'total_revenue': 0, 'total_orders': 0, 'total_ad_cost': 0, 'total_ad_orders': 0, 'store_count': 0})
+
+        for sid in STORES:
+            summary = sdb.get_all_summary(sid)
+            for s in summary:
+                d = s['date']
+                daily[d]['total_revenue'] += s.get('analytics_revenue', 0) or 0
+                daily[d]['total_orders'] += s.get('analytics_units', 0) or 0
+                daily[d]['total_ad_cost'] += s.get('ad_total_cost', 0) or 0
+                daily[d]['total_ad_orders'] += s.get('ad_total_orders', 0) or 0
+                daily[d]['store_count'] += 1
+
+        result = []
+        for date in sorted(daily.keys()):
+            entry = daily[date]
+            entry['date'] = date
+            entry['total_ad_ratio'] = round(entry['total_ad_cost'] / entry['total_revenue'] * 100, 2) if entry['total_revenue'] > 0 else 0
+            result.append(entry)
+
+        return result
 
     # ---- 页面渲染 ----
 
