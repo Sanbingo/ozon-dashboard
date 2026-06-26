@@ -176,6 +176,8 @@ let selectedDate = null;
 let currentTab = 'sku';
 let currentStore = 'overview';
 let storeNames = {};
+let overviewSortKey = 'name';
+let overviewSortDir = 1;
 
 function getSummaryByDate(date) {
   return allData.summary.find(d => d.date === date) || null;
@@ -250,6 +252,7 @@ async function loadOverview() {
   document.getElementById('overviewStoreTable').innerHTML = '';
   try {
     const data = await fetch('/api/overview').then(r => r.json());
+    allData.overviewData = data;
     renderOverview(data);
   } catch(e) {
     document.getElementById('overviewCards').innerHTML = '<div class="card"><div class="label">⚠️</div><div class="value red" style="font-size:18px;">加载失败</div><div class="sub">' + e.message + '</div></div>';
@@ -275,10 +278,30 @@ function renderOverview(data) {
 
   const maxRev = Math.max(...stores.map(s => s.revenue));
   const maxAdCost = Math.max(...stores.map(s => s.ad_cost));
-  let html = '<h3>📋 各店铺数据对比</h3><table><thead><tr>' +
-    '<th>店铺</th><th class="num">订单金额</th><th class="num">件数</th><th class="num">推广费</th><th class="num">占比</th><th class="num">销售额占比</th>' +
+
+  // Sort stores
+  const sortedStores = [...stores].sort((a, b) => {
+    let va, vb;
+    if (overviewSortKey === 'name') { va = a.name; vb = b.name; return va.localeCompare(vb) * overviewSortDir; }
+    if (overviewSortKey === 'revenue') { va = a.revenue; vb = b.revenue; return (va - vb) * overviewSortDir; }
+    if (overviewSortKey === 'orders') { va = a.orders; vb = b.orders; return (va - vb) * overviewSortDir; }
+    if (overviewSortKey === 'ad_cost') { va = a.ad_cost; vb = b.ad_cost; return (va - vb) * overviewSortDir; }
+    if (overviewSortKey === 'ad_ratio') { va = a.ad_ratio; vb = b.ad_ratio; return (va - vb) * overviewSortDir; }
+    if (overviewSortKey === 'revenue_pct') { va = a.revenue_pct || 0; vb = b.revenue_pct || 0; return (va - vb) * overviewSortDir; }
+    return 0;
+  });
+
+  const sortArrow = (key) => overviewSortKey === key ? (overviewSortDir === 1 ? ' ▲' : ' ▼') : '';
+
+  let html = '<h3>📋 各店铺数据对比 <span style="font-size:12px;color:var(--muted);font-weight:400;">点击表头排序</span></h3><table><thead><tr>' +
+    '<th onclick="toggleSort(\'name\')" style="cursor:pointer;">店铺' + sortArrow('name') + '</th>' +
+    '<th class="num" onclick="toggleSort(\'revenue\')" style="cursor:pointer;">订单金额' + sortArrow('revenue') + '</th>' +
+    '<th class="num" onclick="toggleSort(\'orders\')" style="cursor:pointer;">件数' + sortArrow('orders') + '</th>' +
+    '<th class="num" onclick="toggleSort(\'ad_cost\')" style="cursor:pointer;">推广费' + sortArrow('ad_cost') + '</th>' +
+    '<th class="num" onclick="toggleSort(\'ad_ratio\')" style="cursor:pointer;">费占比' + sortArrow('ad_ratio') + '</th>' +
+    '<th class="num" onclick="toggleSort(\'revenue_pct\')" style="cursor:pointer;">销售额占比' + sortArrow('revenue_pct') + '</th>' +
     '</tr></thead><tbody>';
-  for (const s of stores) {
+  for (const s of sortedStores) {
     const revBar = (s.revenue / maxRev * 100).toFixed(0);
     const adBar = maxAdCost > 0 ? (s.ad_cost / maxAdCost * 100).toFixed(0) : 0;
     const adPct = s.ad_ratio > 0 ? s.ad_ratio.toFixed(2) + '%' : '—';
@@ -293,6 +316,16 @@ function renderOverview(data) {
   }
   html += '</tbody></table>';
   document.getElementById('overviewStoreTable').innerHTML = html;
+}
+
+function toggleSort(key) {
+  if (overviewSortKey === key) {
+    overviewSortDir *= -1;
+  } else {
+    overviewSortKey = key;
+    overviewSortDir = 1;
+  }
+  renderOverview(allData.overviewData);
 }
 
 // ========== 登录/退出 ==========
