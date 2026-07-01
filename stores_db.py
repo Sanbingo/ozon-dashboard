@@ -6,7 +6,7 @@ import sqlite3
 import os
 from datetime import datetime
 
-DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
+DB_DIR = "/root/scripts/ozon/data"
 
 def _db_path(store_id):
     """每个店铺独立数据库文件"""
