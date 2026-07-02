@@ -16,8 +16,10 @@ FILES=(
   "config.py"
   "dashboard.py"
   "dashboard.html"
+  "settings.html"
   "dashboard_login.py"
   "stores_db.py"
+  "user_store_db.py"
 )
 
 # 创建远程目录

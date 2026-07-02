@@ -1,31 +1,22 @@
 """
 Login module for dashboard — session management with 24h expiry
+Users are stored in user_store_db (users.db)
 """
-import hashlib
 import time
 import secrets
-import uuid
+import os, sys
 
-# Hardcoded users
-USERS = {
-    "OZON": "000111",
-}
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import user_store_db as usdb
 
 # In-memory session store: token -> {"username": str, "expires_at": float}
 _sessions = {}
 
 
-def _hash_password(password):
-    """Simple SHA-256 hash for password (basic protection)."""
-    return hashlib.sha256(password.encode()).hexdigest()
-
-
 def verify_login(username, password):
-    """Check username/password against hardcoded users."""
-    stored = USERS.get(username)
-    if stored and stored == password:
-        return True
-    return False
+    """Check username/password against database."""
+    user = usdb.verify_user(username, password)
+    return user is not None
 
 
 def create_session(username):
@@ -47,7 +38,6 @@ def validate_session(token):
     if not session:
         return None
     if time.time() > session["expires_at"]:
-        # Expired — clean up
         del _sessions[token]
         return None
     return session
