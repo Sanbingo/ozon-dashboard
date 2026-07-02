@@ -199,7 +199,6 @@ class DashboardHandler(SimpleHTTPRequestHandler):
     # ==================== Cron 同步 ====================
 
     # 已知的店铺报告脚本映射 {store_id: script_file}
-    # 新店铺会自动推测脚本名，脚本不存在时会跳过并在警告中提示
     STORE_SCRIPTS = {
         'store6': 'store6-report-format.py',
         'store7': 'ozon-store7-report.py',
@@ -209,6 +208,49 @@ class DashboardHandler(SimpleHTTPRequestHandler):
     }
 
     _REPORT_SCRIPT_DIR = '/root/scripts/ozon'  # 报告脚本存放目录
+
+    def _generate_report_script(self, username, store_info):
+        """为新店铺自动生成报告脚本"""
+        import os as _os
+        sid = store_info['store_id']
+        name = store_info['name']
+
+        script_file = f'ozon-{sid}-report.py'
+        script_path = _os.path.join(self._REPORT_SCRIPT_DIR, script_file)
+
+        # 如果脚本已存在，不覆盖
+        if _os.path.exists(script_path):
+            log(f'报告脚本已存在: {script_file}')
+            return script_file
+
+        # 模板文件路径
+        template_path = _os.path.join(_os.path.dirname(__file__), 'report_template.py')
+        if not _os.path.exists(template_path):
+            log(f'模板文件不存在: {template_path}')
+            return None
+
+        try:
+            with open(template_path, 'r') as f:
+                content = f.read()
+
+            log_file = f'/root/scripts/logs/{sid}-report.log'
+            content = content.replace('__STORE_ID__', sid)
+            content = content.replace('__STORE_NAME__', name)
+            content = content.replace('__USERNAME__', username)
+            content = content.replace('__LOG_FILE__', log_file)
+            content = content.replace('__CLIENT_ID__', store_info['client_id'])
+            content = content.replace('__API_KEY__', store_info['api_key'])
+            content = content.replace('__PERF_CID__', store_info.get('perf_client_id', ''))
+            content = content.replace('__PERF_SECRET__', store_info.get('perf_client_secret', ''))
+
+            with open(script_path, 'w') as f:
+                f.write(content)
+            _os.chmod(script_path, 0o755)
+            log(f'✅ 已生成报告脚本: {script_file}')
+            return script_file
+        except Exception as e:
+            log(f'❌ 生成脚本失败: {e}')
+            return None
 
     def _sync_cron(self, username=None):
         """同步所有用户店铺的定时任务到系统 crontab"""
@@ -352,9 +394,18 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         if ok:
             # 为新店铺初始化数据库
             sdb.init_db(store_id)
+            
+            # 自动生成报告脚本
+            store_info = usdb.get_store(username, store_id)
+            script_file = None
+            if store_info:
+                script_file = self._generate_report_script(username, store_info)
+            
             # 同步定时任务
             cron_err = self._sync_cron(username)
             resp = {'ok': True, 'message': '店铺已添加'}
+            if store_info and not script_file:
+                resp['warning'] = '报告脚本生成失败，定时任务无法创建'
             if cron_err:
                 resp['cron_warning'] = f'定时任务同步失败: {cron_err}'
             self._json_response(resp)
