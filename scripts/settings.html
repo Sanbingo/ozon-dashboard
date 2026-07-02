@@ -85,9 +85,9 @@ body{font-family:-apple-system,'Segoe UI','PingFang SC',system-ui,sans-serif;bac
   <div class="modal">
     <h2 id="modalTitle">添加店铺</h2>
     <div class="form-group">
-      <label class="required">店铺ID</label>
-      <input type="text" id="f_store_id" placeholder="如: store11" autocomplete="off">
-      <div class="hint">唯一标识，添加后不可修改</div>
+      <label>店铺ID（自动生成）</label>
+      <input type="text" id="f_store_id" readonly style="color:#6c8a9e;background:#152230;" autocomplete="off">
+      <div class="hint">添加时自动编号，不可修改</div>
     </div>
     <div class="form-group">
       <label class="required">店铺名称</label>
@@ -103,12 +103,12 @@ body{font-family:-apple-system,'Segoe UI','PingFang SC',system-ui,sans-serif;bac
     </div>
     <div class="form-row">
       <div class="form-group">
-        <label>Performance Client ID</label>
-        <input type="text" id="f_perf_cid" placeholder="广告API Client ID（可选）">
+        <label class="required">Performance Client ID</label>
+        <input type="text" id="f_perf_cid" placeholder="广告API Client ID">
       </div>
       <div class="form-group">
-        <label>Performance Secret</label>
-        <input type="password" id="f_perf_secret" placeholder="广告API Secret（可选）">
+        <label class="required">Performance Secret</label>
+        <input type="password" id="f_perf_secret" placeholder="广告API Secret">
       </div>
     </div>
     <div class="form-group">
@@ -206,8 +206,12 @@ function maskKey(key) {
 function showAddModal() {
   editingId = null;
   document.getElementById('modalTitle').textContent = '添加店铺';
-  document.getElementById('f_store_id').value = '';
-  document.getElementById('f_store_id').disabled = false;
+  // 自动生成店铺ID
+  const maxNum = stores.reduce((max, s) => {
+    const m = s.store_id.match(/store(\d+)/);
+    return m ? Math.max(max, parseInt(m[1])) : max;
+  }, 0);
+  document.getElementById('f_store_id').value = 'store' + (maxNum + 1);
   document.getElementById('f_name').value = '';
   document.getElementById('f_client_id').value = '';
   document.getElementById('f_api_key').value = '';
@@ -252,6 +256,10 @@ async function saveStore() {
 
   if (!data.store_id || !data.name || !data.client_id || !data.api_key) {
     alert('请填写必填字段（店铺ID、名称、Client ID、API Key）');
+    return;
+  }
+  if (!data.perf_client_id || !data.perf_client_secret) {
+    alert('广告API的Client ID和Secret为必填');
     return;
   }
 

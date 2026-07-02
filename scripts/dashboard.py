@@ -219,8 +219,22 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         perf_client_secret = data.get('perf_client_secret', '').strip()
         schedule_time = data.get('schedule_time', '08:40').strip()
 
+        # 自动生成 store_id（如未提供）
+        if not store_id:
+            existing = usdb.get_user_stores(username)
+            import re
+            max_num = 0
+            for s in existing:
+                m = re.match(r'store(\d+)', s.get('store_id', ''))
+                if m:
+                    max_num = max(max_num, int(m.group(1)))
+            store_id = f'store{max_num + 1}'
+
         if not store_id or not name or not client_id or not api_key:
             self._json_response({'ok': False, 'message': 'store_id, name, client_id, api_key 为必填'}, 400)
+            return
+        if not perf_client_id or not perf_client_secret:
+            self._json_response({'ok': False, 'message': '广告API的Client ID和Secret为必填'}, 400)
             return
 
         ok = usdb.add_store(username, store_id, name, client_id, api_key,
