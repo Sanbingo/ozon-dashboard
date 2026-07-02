@@ -8,6 +8,7 @@ from http.server import SimpleHTTPRequestHandler
 from socketserver import ThreadingTCPServer
 from urllib.parse import urlparse, parse_qs
 import os, sys, time, re
+from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import config
@@ -253,37 +254,22 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             return None
 
     def _sync_cron(self, username=None):
-        """同步所有用户店铺的定时任务到系统 crontab"""
+        """同步所有店铺的定时任务到 task_manager（同步到系统 crontab + ai.xmaquaman.com）"""
         import subprocess
-        import re
+        import os as _os
+        import json
 
         try:
-            # 读取当前 crontab
-            r = subprocess.run(['crontab', '-l'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
-            current = r.stdout.decode('utf-8', errors='replace') if r.returncode == 0 else ''
+            tasks_file = '/root/scripts/tasks.json'
 
-            # 剔除旧版 ozon 定时条目 + 标记块，保留其他内容
-            lines = current.split('\n')
-            kept = []
-            in_ozon_block = False
-            for line in lines:
-                if line.strip() == '# === ozon-managed ===':
-                    in_ozon_block = True
-                    continue
-                if line.strip() == '# === end ozon-managed ===':
-                    in_ozon_block = False
-                    continue
-                if in_ozon_block:
-                    continue
-                # 跳过旧的 store-report 条目（避免重复）
-                if re.search(r'store\d+-report', line) and 'python3' in line:
-                    continue
-                kept.append(line)
-
-            # 获取所有店铺（不局限于已知映射），有新店铺自动推测脚本名
-            import os as _os
-            new_entries = []
-            skipped_stores = []  # 记录无脚本的店铺
+            # 读取现有的 tasks.json
+            tasks = {}
+            if _os.path.exists(tasks_file):
+                try:
+                    with open(tasks_file, 'r') as f:
+                        tasks = json.load(f)
+                except:
+                    tasks = {}
 
             # 收集所有用户的启用店铺
             all_stores = {}
@@ -295,52 +281,105 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                     if sid not in all_stores:
                         all_stores[sid] = s
 
+            skipped_stores = []
+            synced_stores = []
+
             for sid, store_info in sorted(all_stores.items()):
-                # 先查已知映射
+                # 查找报告脚本
                 script = self.STORE_SCRIPTS.get(sid)
                 if not script:
-                    # 自动推测脚本名：ozon-{sid}-report.py
                     guessed = f"ozon-{sid}-report.py"
-                    script_path = _os.path.join(self._REPORT_SCRIPT_DIR, guessed)
-                    if _os.path.exists(script_path):
+                    if _os.path.exists(_os.path.join(self._REPORT_SCRIPT_DIR, guessed)):
                         script = guessed
                     else:
-                        # 也试试 {sid}-report-format.py
                         guessed2 = f"{sid}-report-format.py"
-                        script_path2 = _os.path.join(self._REPORT_SCRIPT_DIR, guessed2)
-                        if _os.path.exists(script_path2):
+                        if _os.path.exists(_os.path.join(self._REPORT_SCRIPT_DIR, guessed2)):
                             script = guessed2
                         else:
                             skipped_stores.append(f'{sid} ({store_info["name"]})')
+                            # 从 task_manager 移除无脚本的任务
+                            task_name = f'ozon-{sid}'
+                            if task_name in tasks:
+                                del tasks[task_name]
                             continue
 
                 t = store_info.get('schedule_time', '08:40')
                 try:
                     hour, minute = t.strip().split(':')
-                    hour = str(int(hour))
-                    minute = str(int(minute))
+                    cron_expr = f"{int(minute)} {int(hour)} * * *"
                 except:
-                    hour, minute = '8', '40'
+                    cron_expr = '40 8 * * *'
 
-                log_file = f"/root/scripts/logs/{sid}-report.log"
-                entry = f"{minute} {hour} * * * cd /root/scripts && python3 /root/scripts/ozon/{script} >> {log_file} 2>&1"
-                new_entries.append(entry)
+                task_name = f'ozon-{sid}'
+                script_path = f'/root/scripts/ozon/{script}'
 
-            # 组装新 crontab
-            new_cron = '\n'.join(kept)
-            if kept and kept[-1] != '':
-                new_cron += '\n'
-            new_cron += '# === ozon-managed ===\n'
-            for e in new_entries:
-                new_cron += e + '\n'
-            new_cron += '# === end ozon-managed ===\n'
+                # 更新或添加到 tasks.json（兼容 task_manager 格式）
+                if task_name not in tasks:
+                    tasks[task_name] = {
+                        'name': task_name,
+                        'cron': cron_expr,
+                        'cmd': f'python3 {script_path}',
+                        'enabled': True,
+                        'category': 'ozon',
+                        'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                        'last_run': None,
+                        'last_status': None,
+                    }
+                else:
+                    tasks[task_name]['cron'] = cron_expr
+                    tasks[task_name]['cmd'] = f'python3 {script_path}'
+                    tasks[task_name]['enabled'] = True
+                    if 'category' not in tasks[task_name]:
+                        tasks[task_name]['category'] = 'ozon'
 
-            # 写入 crontab
-            p = subprocess.run(['crontab', '-'], input=new_cron.encode(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
-            if p.returncode != 0:
-                return f'crontab 写入失败: {p.stderr.decode()[:200]}'
+                synced_stores.append(f'{sid} ({store_info["name"]})')
 
-            # 如有跳过的店铺，返回警告
+            # 移除已停用的店铺任务
+            active_sids = set(all_stores.keys())
+            to_remove = [k for k in tasks if k.startswith('ozon-store')]
+            for k in to_remove:
+                sid = k.replace('ozon-', '')
+                if sid not in active_sids:
+                    del tasks[k]
+
+            # 写入 tasks.json
+            with open(tasks_file, 'w') as f:
+                json.dump(tasks, f, indent=2, ensure_ascii=False)
+
+            # 调用 task_manager 重建系统 crontab（通过 import 直接调用 write_crontab）
+            sys.path.insert(0, '/root/scripts')
+            try:
+                import task_manager as tm
+                tm.write_crontab(tasks)
+            except Exception as e:
+                # 回退：直接写入 crontab
+                # 回退：直接写入 crontab
+                orig_cron = subprocess.run(['crontab', '-l'], stdout=subprocess.PIPE, timeout=10)
+                current = orig_cron.stdout.decode('utf-8', errors='replace') if orig_cron.returncode == 0 else ''
+                # 保留非 task_manager、非 ozon 管理的条目
+                import re as _re
+                kept = []
+                skip = False
+                for line in current.split('\n'):
+                    if line.strip() in ('# === task_manager managed ===', '# === ozon-managed ==='):
+                        skip = True; continue
+                    if line.strip() in ('# === end task_manager ===', '# === end ozon-managed ==='):
+                        skip = False; continue
+                    if skip: continue
+                    kept.append(line)
+                # 追加 task_manager 块
+                kept.append('')
+                kept.append('# === task_manager managed ===')
+                for name, tk in sorted(tasks.items()):
+                    if tk.get('enabled', True):
+                        kept.append(f"{tk['cron']} cd /root/scripts && {tk['cmd']} >> /root/scripts/logs/{name}.log 2>&1")
+                kept.append('# === end task_manager ===')
+                kept.append('')
+                p = subprocess.run(['crontab', '-'], input='\n'.join(kept).encode(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+                if p.returncode != 0:
+                    return f'crontab 写入失败: {p.stderr.decode()[:200]}'
+
+            # 如有跳过的店铺，附加警告
             if skipped_stores:
                 return f'以下店铺无报告脚本，未添加定时任务: {", ".join(skipped_stores)}'
 
