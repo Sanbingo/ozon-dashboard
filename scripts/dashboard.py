@@ -196,6 +196,92 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         stores = usdb.get_user_stores(username)
         return {'stores': stores}
 
+    # ==================== Cron 同步 ====================
+
+    # 已知的店铺报告脚本映射 {store_id: script_file}
+    STORE_SCRIPTS = {
+        'store6': 'store6-report-format.py',
+        'store7': 'ozon-store7-report.py',
+        'store8': 'ozon-store8-report.py',
+        'store9': 'ozon-store9-report.py',
+        'store10': 'ozon-store10-report.py',
+        'store11': None,  # 新店铺脚本待创建
+    }
+
+    def _sync_cron(self, username=None):
+        """同步所有用户店铺的定时任务到系统 crontab"""
+        import subprocess
+        import re
+
+        try:
+            # 读取当前 crontab
+            r = subprocess.run(['crontab', '-l'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+            current = r.stdout.decode('utf-8', errors='replace') if r.returncode == 0 else ''
+
+            # 剔除旧版 ozon 定时条目 + 标记块，保留其他内容
+            lines = current.split('\n')
+            kept = []
+            in_ozon_block = False
+            for line in lines:
+                if line.strip() == '# === ozon-managed ===':
+                    in_ozon_block = True
+                    continue
+                if line.strip() == '# === end ozon-managed ===':
+                    in_ozon_block = False
+                    continue
+                if in_ozon_block:
+                    continue
+                # 跳过旧的 store-report 条目（避免重复）
+                if re.search(r'store\d+-report', line) and 'python3' in line:
+                    continue
+                kept.append(line)
+
+            # 生成新的 cron 条目
+            new_entries = []
+            for sid, script in sorted(self.STORE_SCRIPTS.items()):
+                if not script:  # 跳过无脚本的店铺
+                    continue
+                # 查询是否启用
+                store_info = None
+                for uname in ('OZON', 'HF', username) if username else ('OZON', 'HF'):
+                    s = usdb.get_store(uname, sid)
+                    if s and s.get('enabled', 1):
+                        store_info = s
+                        break
+
+                if not store_info or not store_info.get('enabled', 1):
+                    continue
+
+                t = store_info.get('schedule_time', '08:40')
+                try:
+                    hour, minute = t.strip().split(':')
+                    hour = str(int(hour))
+                    minute = str(int(minute))
+                except:
+                    hour, minute = '8', '40'
+
+                log_file = f"/root/scripts/logs/{sid}-report.log"
+                entry = f"{minute} {hour} * * * cd /root/scripts && python3 /root/scripts/ozon/{script} >> {log_file} 2>&1"
+                new_entries.append(entry)
+
+            # 组装新 crontab
+            new_cron = '\n'.join(kept)
+            if kept and kept[-1] != '':
+                new_cron += '\n'
+            new_cron += '# === ozon-managed ===\n'
+            for e in new_entries:
+                new_cron += e + '\n'
+            new_cron += '# === end ozon-managed ===\n'
+
+            # 写入 crontab
+            p = subprocess.run(['crontab', '-'], input=new_cron.encode(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+            if p.returncode != 0:
+                return f'crontab 写入失败: {p.stderr.decode()[:200]}'
+
+            return None  # 成功
+        except Exception as e:
+            return f'cron 同步异常: {str(e)[:200]}'
+
     def _handle_add_store(self):
         session = self._check_session()
         if not session:
@@ -242,7 +328,12 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         if ok:
             # 为新店铺初始化数据库
             sdb.init_db(store_id)
-            self._json_response({'ok': True, 'message': '店铺已添加'})
+            # 同步定时任务
+            cron_err = self._sync_cron(username)
+            resp = {'ok': True, 'message': '店铺已添加'}
+            if cron_err:
+                resp['cron_warning'] = f'定时任务同步失败: {cron_err}'
+            self._json_response(resp)
         else:
             self._json_response({'ok': False, 'message': '店铺ID已存在'}, 409)
 
@@ -273,7 +364,14 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 updates[field] = data[field]
 
         ok = usdb.update_store(row_id, username, **updates)
-        self._json_response({'ok': ok, 'message': '已更新' if ok else '更新失败'})
+        resp = {'ok': ok, 'message': '已更新' if ok else '更新失败'}
+        if ok:
+            # 同步定时任务（如果涉及 schedule_time 或 enabled 变更）
+            if any(k in updates for k in ('schedule_time', 'enabled')):
+                cron_err = self._sync_cron(username)
+                if cron_err:
+                    resp['cron_warning'] = f'定时任务同步失败: {cron_err}'
+        self._json_response(resp)
 
     def _handle_delete_store(self):
         session = self._check_session()
@@ -296,7 +394,12 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             return
 
         ok = usdb.delete_store(row_id, username)
-        self._json_response({'ok': ok, 'message': '已删除' if ok else '删除失败'})
+        resp = {'ok': ok, 'message': '已删除' if ok else '删除失败'}
+        if ok:
+            cron_err = self._sync_cron(username)
+            if cron_err:
+                resp['cron_warning'] = f'定时任务同步失败: {cron_err}'
+        self._json_response(resp)
 
     # ==================== 总览数据 ====================
 

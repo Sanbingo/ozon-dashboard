@@ -279,6 +279,9 @@ async function saveStore() {
   if (result && result.ok) {
     closeModal();
     await loadStores();
+    if (result.cron_warning) {
+      setTimeout(() => alert('⚠️ ' + result.cron_warning), 100);
+    }
   } else if (result) {
     alert(result.message || '保存失败');
   }
@@ -298,6 +301,9 @@ async function toggleStore(id, enabled) {
   const result = await api('POST', '/api/user/store/update', { id, enabled: enabled ? 1 : 0 });
   if (result && result.ok) {
     await loadStores();
+    if (result.cron_warning) {
+      setTimeout(() => alert('⚠️ ' + result.cron_warning), 100);
+    }
   }
 }
 
