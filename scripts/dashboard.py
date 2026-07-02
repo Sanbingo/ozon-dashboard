@@ -199,14 +199,16 @@ class DashboardHandler(SimpleHTTPRequestHandler):
     # ==================== Cron 同步 ====================
 
     # 已知的店铺报告脚本映射 {store_id: script_file}
+    # 新店铺会自动推测脚本名，脚本不存在时会跳过并在警告中提示
     STORE_SCRIPTS = {
         'store6': 'store6-report-format.py',
         'store7': 'ozon-store7-report.py',
         'store8': 'ozon-store8-report.py',
         'store9': 'ozon-store9-report.py',
         'store10': 'ozon-store10-report.py',
-        'store11': None,  # 新店铺脚本待创建
     }
+
+    _REPORT_SCRIPT_DIR = '/root/scripts/ozon'  # 报告脚本存放目录
 
     def _sync_cron(self, username=None):
         """同步所有用户店铺的定时任务到系统 crontab"""
@@ -236,21 +238,39 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                     continue
                 kept.append(line)
 
-            # 生成新的 cron 条目
+            # 获取所有店铺（不局限于已知映射），有新店铺自动推测脚本名
+            import os as _os
             new_entries = []
-            for sid, script in sorted(self.STORE_SCRIPTS.items()):
-                if not script:  # 跳过无脚本的店铺
-                    continue
-                # 查询是否启用
-                store_info = None
-                for uname in ('OZON', 'HF', username) if username else ('OZON', 'HF'):
-                    s = usdb.get_store(uname, sid)
-                    if s and s.get('enabled', 1):
-                        store_info = s
-                        break
+            skipped_stores = []  # 记录无脚本的店铺
 
-                if not store_info or not store_info.get('enabled', 1):
-                    continue
+            # 收集所有用户的启用店铺
+            all_stores = {}
+            for uname in ('OZON', 'HF', username) if username else ('OZON', 'HF'):
+                for s in usdb.get_user_stores(uname):
+                    if not s.get('enabled', 1):
+                        continue
+                    sid = s['store_id']
+                    if sid not in all_stores:
+                        all_stores[sid] = s
+
+            for sid, store_info in sorted(all_stores.items()):
+                # 先查已知映射
+                script = self.STORE_SCRIPTS.get(sid)
+                if not script:
+                    # 自动推测脚本名：ozon-{sid}-report.py
+                    guessed = f"ozon-{sid}-report.py"
+                    script_path = _os.path.join(self._REPORT_SCRIPT_DIR, guessed)
+                    if _os.path.exists(script_path):
+                        script = guessed
+                    else:
+                        # 也试试 {sid}-report-format.py
+                        guessed2 = f"{sid}-report-format.py"
+                        script_path2 = _os.path.join(self._REPORT_SCRIPT_DIR, guessed2)
+                        if _os.path.exists(script_path2):
+                            script = guessed2
+                        else:
+                            skipped_stores.append(f'{sid} ({store_info["name"]})')
+                            continue
 
                 t = store_info.get('schedule_time', '08:40')
                 try:
@@ -277,6 +297,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             p = subprocess.run(['crontab', '-'], input=new_cron.encode(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
             if p.returncode != 0:
                 return f'crontab 写入失败: {p.stderr.decode()[:200]}'
+
+            # 如有跳过的店铺，返回警告
+            if skipped_stores:
+                return f'以下店铺无报告脚本，未添加定时任务: {", ".join(skipped_stores)}'
 
             return None  # 成功
         except Exception as e:
