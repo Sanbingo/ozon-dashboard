@@ -22,7 +22,12 @@ FILES=(
 
 # 创建远程目录
 echo "📁 创建远程目录..."
-ssh "$SERVER" "mkdir -p $REMOTE_DIR/data $REMOTE_DIR/logs"
+ssh "$SERVER" "mkdir -p $REMOTE_DIR/logs"
+
+# 数据目录指向日报脚本的数据库（symlink），避免重复
+# 日报脚本保存在 /root/scripts/ozon/data/ 下
+echo "🔗 确保数据目录 symlink..."
+ssh "$SERVER" "rm -rf $REMOTE_DIR/data && ln -sf /root/scripts/ozon/data $REMOTE_DIR/data && echo '  ✅ symlink: $REMOTE_DIR/data → /root/scripts/ozon/data'" 2>/dev/null || echo '  ⚠️ symlink 创建失败（可能首次部署时忽略）'
 
 # 上传文件
 echo "📤 上传文件..."
@@ -41,16 +46,7 @@ if [ -f "$LOCAL_DIR/login.html" ]; then
   echo "  ✅ login.html"
 fi
 
-# 初始化数据库
-echo ""
-echo "🗄️  初始化数据库..."
-ssh "$SERVER" "cd $REMOTE_DIR && python3 -c \"
-import config
-import stores_db as sdb
-for sid in config.OZON_STORE_KEYS:
-    sdb.init_db(sid)
-    print(f'  init ✅ {sid}')
-\""
+# 数据库已在 /root/scripts/ozon/data/ 中存在，无需重新初始化
 
 # 重启服务
 echo ""

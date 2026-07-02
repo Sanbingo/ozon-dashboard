@@ -222,12 +222,22 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             if latest_date is None or d > latest_date:
                 latest_date = d
 
+            # analytics 为空时兜底使用 FBO 数据
+            orders = entry.get('analytics_units') or 0
+            revenue = entry.get('analytics_revenue') or 0
+            if orders == 0 and revenue == 0:
+                fbo_orders = entry.get('fbo_orders') or 0
+                fbo_revenue = entry.get('fbo_revenue') or 0
+                if fbo_orders > 0 or fbo_revenue > 0:
+                    orders = fbo_orders
+                    revenue = fbo_revenue
+
             stores_data.append({
                 'store_id': sid,
                 'name': STORES[sid],
                 'date': d,
-                'orders': entry.get('analytics_units', 0) or 0,
-                'revenue': entry.get('analytics_revenue', 0) or 0,
+                'orders': orders,
+                'revenue': revenue,
                 'ad_cost': entry.get('ad_total_cost', 0) or 0,
                 'ad_orders': entry.get('ad_total_orders', 0) or 0,
                 'ad_revenue': entry.get('ad_total_revenue', 0) or 0,
@@ -269,8 +279,14 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             summary = sdb.get_all_summary(sid)
             for s in summary:
                 d = s['date']
-                daily[d]['total_revenue'] += s.get('analytics_revenue', 0) or 0
-                daily[d]['total_orders'] += s.get('analytics_units', 0) or 0
+                # analytics 为空时兜底使用 FBO 数据
+                rev = s.get('analytics_revenue') or 0
+                ords = s.get('analytics_units') or 0
+                if ords == 0 and rev == 0:
+                    rev = s.get('fbo_revenue') or 0
+                    ords = s.get('fbo_orders') or 0
+                daily[d]['total_revenue'] += rev
+                daily[d]['total_orders'] += ords
                 daily[d]['total_ad_cost'] += s.get('ad_total_cost', 0) or 0
                 daily[d]['total_ad_orders'] += s.get('ad_total_orders', 0) or 0
                 daily[d]['store_count'] += 1
