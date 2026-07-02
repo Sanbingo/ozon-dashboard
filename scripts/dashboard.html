@@ -47,6 +47,12 @@
     cursor: pointer; transition: all .2s; white-space: nowrap;
   }
   .btn-logout:hover { background: rgba(255,82,82,.15); color: var(--red); border-color: var(--red); }
+  .btn-settings {
+    padding: 6px 14px; border-radius: 8px; border: 1px solid var(--border);
+    background: transparent; color: var(--muted); font-size: 13px;
+    cursor: pointer; transition: all .2s; white-space: nowrap;
+  }
+  .btn-settings:hover { background: var(--highlight); color: var(--accent); border-color: var(--accent); }
   .date-picker { display: flex; align-items: center; gap: 10px; }
   .date-picker label { color: var(--muted); font-size: 14px; }
   .date-picker select {
@@ -142,6 +148,7 @@
       <label>📅 日期</label>
       <select id="dateSelect" onchange="switchDate(this.value)"></select>
     </div>
+    <button class="btn-settings" onclick="window.location.href='/settings'" title="店铺管理">⚙️ 设置</button>
     <button class="btn-logout" onclick="doLogout()" title="退出登录">🚪 退出</button>
   </div>
 </div>
