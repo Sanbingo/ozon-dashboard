@@ -80,9 +80,20 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self._json_response(self._get_overview(username, stores, date))
             return
 
-        # 如果用户没有店铺，返回空
+        # 即使没有店铺也能访问的端点
+        if path == '/api/stores':
+            self._json_response(stores)
+            return
+        if path == '/api/session':
+            self._json_response({'username': session['username']})
+            return
+        if path == '/':
+            self._serve_html()
+            return
+
+        # 如果用户没有店铺，返回友好提示（非错误）
         if not stores:
-            self._json_response({'error': 'no stores configured', 'stores': {}})
+            self._json_response({'message': 'no stores', 'stores': {}})
             return
 
         store = params.get('store', [list(stores.keys())[0]])[0]
@@ -101,12 +112,6 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 self._send_error(400, '缺少 date 参数')
                 return
             self._json_response(sdb.get_sku_daily(store, date))
-        elif path == '/api/stores':
-            self._json_response(stores)
-        elif path == '/api/session':
-            self._json_response({'username': session['username']})
-        elif path == '/':
-            self._serve_html()
         else:
             super().do_GET()
 
