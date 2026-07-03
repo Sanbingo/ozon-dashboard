@@ -10,7 +10,7 @@ from datetime import datetime, timezone, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import config
-from lib.feishu import get_tenant_token  # feishu send disabled
+from lib.feishu import get_tenant_token, send_text
 import store6_db
 
 LOG_FILE = f"{config.LOG_DIR}/ozon-store6-report.log"
@@ -87,16 +87,37 @@ def get_campaign_skus(token):
                 campaign_skus[str(p.get('sku',''))] = cid
     return campaign_skus, campaign_names
 
-def get_analytics(date_str):
-    headers = {"Client-Id": SELLER_CLIENT_ID, "Api-Key": SELLER_API_KEY, "Content-Type": "application/json"}
-    payload = json.dumps({"date_from": date_str, "date_to": date_str,
-                          "metrics": ["ordered_units", "revenue"], "dimension": ["day"],
-                          "limit": 100, "offset": 0})
-    r = curl("POST", f"{SELLER_BASE}/v1/analytics/data", headers, payload, timeout=30)
-    data = r.get('result', {}).get('data', [])
-    if data:
-        m = data[0].get('metrics', [])
-        if len(m) >= 2: return int(m[0]), float(m[1])
+def get_analytics(date_str, max_retries=3, retry_delay=60):
+    """获取Ozon Analytics官方统计数据（排除取消/退货），失败后自动重试"""
+    headers = {
+        "Client-Id": SELLER_CLIENT_ID,
+        "Api-Key": SELLER_API_KEY,
+        "Content-Type": "application/json"
+    }
+    payload = json.dumps({
+        "date_from": date_str,
+        "date_to": date_str,
+        "metrics": ["ordered_units", "revenue"],
+        "dimension": ["day"],
+        "limit": 100,
+        "offset": 0
+    })
+    for attempt in range(1, max_retries + 1):
+        r = curl("POST", f"{SELLER_BASE}/v1/analytics/data", headers, payload, timeout=30)
+        result = r.get("result", {})
+        data = result.get("data", [])
+        if data:
+            metrics = data[0].get("metrics", [])
+            if len(metrics) >= 2:
+                ordered_units = metrics[0]
+                ordered_money = metrics[1]
+                log(f"Analytics ✅ {ordered_units}件, {ordered_money:,.0f}₽（第{attempt}次）")
+                return ordered_units, ordered_money
+        if attempt < max_retries:
+            log(f"Analytics ⚠️ 第{attempt}次未获取到数据，{retry_delay}秒后重试...")
+            import time
+            time.sleep(retry_delay)
+    log(f"Analytics ❌ 重试{max_retries}次后仍未获取到数据")
     return None, None
 
 def get_fbo_orders(date_str):
@@ -179,14 +200,14 @@ def main():
 
     # 6. 保存到数据库
     try:
-        store6_db.init_db()
-        store6_db.save_summary(yesterday, analytics_units, analytics_revenue,
+        store6_db.init_db("store6")
+        store6_db.save_summary("store6", yesterday, analytics_units, analytics_revenue,
                                fbo_orders, sum(d['units'] for _, d in sorted_skus),
                                sum(d['revenue'] for _, d in sorted_skus), len(sorted_skus),
                                ad_total_cost, sum(s['orders'] for s in ad_stats),
                                sum(s['revenue'] for s in ad_stats), sum(1 for s in sku_data if s in campaign_skus))
-        store6_db.save_sku_list(yesterday, sorted_skus, campaign_skus, ad_by_campaign, camp_sku_count)
-        store6_db.save_campaigns(yesterday, ad_stats, campaign_names, camp_sku_count)
+        store6_db.save_sku_list("store6", yesterday, sorted_skus, campaign_skus, ad_by_campaign, camp_sku_count)
+        store6_db.save_campaigns("store6", yesterday, ad_stats, campaign_names, camp_sku_count)
         log("✅ 数据已存入数据库")
     except Exception as e:
         log(f"⚠️ 数据库写入失败: {e}")
@@ -246,7 +267,7 @@ def main():
     report = "\n".join(lines)
     log(f"\n{report}")
 
-    # 7. 飞书通知已关闭
+    # 7. 发飞书（已关闭）
     log("✅ 飞书通知已关闭")
 
 if __name__ == '__main__':
