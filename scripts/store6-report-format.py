@@ -10,7 +10,7 @@ from datetime import datetime, timezone, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import config
-from lib.feishu import get_tenant_token, send_text
+from lib.feishu import get_tenant_token  # feishu send disabled
 import store6_db
 
 LOG_FILE = f"{config.LOG_DIR}/ozon-store6-report.log"
@@ -246,13 +246,8 @@ def main():
     report = "\n".join(lines)
     log(f"\n{report}")
 
-    # 7. 发飞书
-    try:
-        ft = get_tenant_token()
-        send_text(ft, "oc_4d130dc369f8ea8ef3e5aaf88ba70f16", report, 'chat_id')
-        log("✅ 飞书群已发送")
-    except Exception as e:
-        log(f"❌ 飞书发送失败: {e}")
+    # 7. 飞书通知已关闭
+    log("✅ 飞书通知已关闭")
 
 if __name__ == '__main__':
     main()

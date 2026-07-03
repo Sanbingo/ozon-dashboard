@@ -5,7 +5,7 @@ Ozon 每日订单报告脚本
 1. 登录OAS获取昨日数据
 2. 生成HTML图表
 3. Chrome截图
-4. 发飞书（文字+图片）
+4. 记录日志（飞书通知已关闭）
 """
 import json
 import subprocess
@@ -15,7 +15,6 @@ from datetime import datetime, timezone, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import config
-from lib.feishu import get_tenant_token, send_text_to_user, upload_image, send_image
 
 LOG_FILE = f"{config.LOG_DIR}/ozon-daily.log"
 
@@ -153,40 +152,12 @@ def main():
         
         # 2. 生成HTML+截图
         generate_html(data)
-        if not screenshot():
-            log("截图失败，尝试继续发送文字")
-        
-        # 3. 发送到飞书
-        feishu_token = get_tenant_token()
-        
-        y = data.get('yesterday', {})
-        t = data.get('today', {})
-        y_avg = round(y.get('amount', 0) / y.get('count', 1)) if y.get('count') else 0
-        
-        text = (
-            f"📊 Ozon 昨日数据报告\n\n"
-            f"【昨日总金额】{y.get('amount', 0):,} ₽\n"
-            f"【昨日订单数】{y.get('count', 0)} 单\n"
-            f"【客单价】{y_avg:,} ₽\n"
-            f"\n今日截至现在：{t.get('amount', 0):,} ₽ / {t.get('count', 0)} 单"
-        )
-        send_text_to_user(feishu_token, text)
-        
-        # 发送图片
-        if os.path.exists('/tmp/ozon_daily_report.png'):
-            img_key = upload_image(feishu_token, '/tmp/ozon_daily_report.png')
-            send_image(feishu_token, config.FEISHU_USER_ID, img_key)
+        screenshot()
         
         log("=== Ozon日报完成 ✅ ===")
         
     except Exception as e:
         log(f"❌ 失败: {e}")
-        # 尝试发报错到飞书
-        try:
-            tk = get_tenant_token()
-            send_text_to_user(tk, f"❌ Ozon日报执行失败: {str(e)[:200]}")
-        except:
-            pass
         sys.exit(1)
 
 
