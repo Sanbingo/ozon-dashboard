@@ -70,6 +70,22 @@ def get_perf_daily_stats(token, date_from, date_to):
         })
     return rows
 
+def get_perf_sku_stats(token, date, campaign_ids):
+    """获取SKU级的推广费数据（新接口）"""
+    if not campaign_ids:
+        return {}
+    h = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    data = json.dumps({"date_from": date, "date_to": date, "campaignIds": campaign_ids})
+    resp = curl("POST", f"{PERF_BASE}/api/client/statistics/products/sku", h, data, timeout=30)
+    rows = resp.get('rows', []) if isinstance(resp, dict) else []
+    if rows:
+        log(f"SKU级推广费 ✅ {len(rows)}条")
+    else:
+        log(f"SKU级推广费 ⚠️ 无数据: {str(resp)[:100]}")
+    # 返回 {sku: expense} 字典
+    return {r.get('sku',''): float(r.get('expense',0) or 0) for r in rows}
+
+
 def get_campaign_skus(token):
     h = {"Authorization": f"Bearer {token}"}
     text = curl_text("GET", f"{PERF_BASE}/api/client/campaign?adv_page_type=", h)
@@ -198,6 +214,12 @@ def main():
         camp_sku_count[cid] = camp_sku_count.get(cid, 0) + 1
     ad_by_campaign = {s['id']: s for s in ad_stats}
 
+    # 5b. 获取 SKU 级推广费（新接口，优先使用）
+    sku_ad_expenses = {}
+    if perf_token and ad_stats:
+        running_cids = [s['id'] for s in ad_stats]
+        sku_ad_expenses = get_perf_sku_stats(perf_token, yesterday, running_cids)
+
     # 6. 保存到数据库
     try:
         store6_db.init_db("store6")
@@ -206,7 +228,7 @@ def main():
                                sum(d['revenue'] for _, d in sorted_skus), len(sorted_skus),
                                ad_total_cost, sum(s['orders'] for s in ad_stats),
                                sum(s['revenue'] for s in ad_stats), sum(1 for s in sku_data if s in campaign_skus))
-        store6_db.save_sku_list("store6", yesterday, sorted_skus, campaign_skus, ad_by_campaign, camp_sku_count)
+        store6_db.save_sku_list("store6", yesterday, sorted_skus, campaign_skus, ad_by_campaign, camp_sku_count, sku_ad_expenses)
         store6_db.save_campaigns("store6", yesterday, ad_stats, campaign_names, camp_sku_count)
         log("✅ 数据已存入数据库")
     except Exception as e:
@@ -235,8 +257,11 @@ def main():
         name = d['name'][:32]
         cid = campaign_skus.get(sku)
         if cid and cid in ad_by_campaign:
-            n = camp_sku_count.get(cid, 1)
-            ac = ad_by_campaign[cid]['cost'] / n
+            if sku_ad_expenses and sku in sku_ad_expenses:
+                ac = sku_ad_expenses[sku]
+            else:
+                n = camp_sku_count.get(cid, 1)
+                ac = ad_by_campaign[cid]['cost'] / n
             pct = ac / d['revenue'] * 100 if d['revenue'] > 0 else 0
             lines.append(f"{name:<34} | {d['orders']:>4} | {d['units']:>4} | {d['revenue']:>9,.0f}₽ | {ac:>7,.0f}₽ | {pct:>4.1f}%")
             ad_sku_orders += d['orders']; ad_sku_revenue += d['revenue']; ad_sku_count += 1
@@ -260,7 +285,10 @@ def main():
         lines.append(f"   非推广 {len(sorted_skus)-ad_sku_count}个 → {fbo_orders-ad_sku_orders}单, {fbo_rev-ad_sku_revenue:,.0f}₽")
         lines.append(f"   推广费占总销售额：{ad_total_cost/fbo_rev*100:.2f}%")
         lines.append(f"")
-        lines.append(f"⚠️ 推广费按活动SKU数量均摊（API不提供SKU级明细）")
+        if sku_ad_expenses:
+            lines.append(f"✅ 推广费来自Performance API SKU级接口（精确）")
+        else:
+            lines.append(f"⚠️ 推广费按活动SKU数量均摊（API不提供SKU级明细）")
         if analytics_units is not None:
             lines.append(f"   总件数以Ozon Analytics为准（含RFBS），商品明细仅含FBO/FBS")
 

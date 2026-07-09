@@ -90,13 +90,21 @@ def save_summary(store_id, date, analytics_units, analytics_revenue,
     conn.commit()
     conn.close()
 
-def save_sku_list(store_id, date, sku_data, campaign_skus, ad_by_campaign, camp_sku_count):
+def save_sku_list(store_id, date, sku_data, campaign_skus, ad_by_campaign, camp_sku_count, sku_ad_expenses=None):
+    """保存商品明细
+
+    sku_ad_expenses: 可选，{sku: exact_expense} 来自 Performance API 的 SKU 级推广费。
+                     传此参数时优先使用精确值，代替均摊。
+    """
     conn = get_conn(store_id)
     for sku, d in sku_data:
         cid = campaign_skus.get(sku)
         if cid and cid in ad_by_campaign:
-            n = camp_sku_count.get(cid, 1)
-            ac = ad_by_campaign[cid]['cost'] / n
+            if sku_ad_expenses and sku in sku_ad_expenses:
+                ac = sku_ad_expenses[sku]  # 精确的 SKU 级推广费
+            else:
+                n = camp_sku_count.get(cid, 1)
+                ac = ad_by_campaign[cid]['cost'] / n  # 回退：均摊
             pct = ac / d['revenue'] * 100 if d['revenue'] > 0 else 0
             is_ad = 1
         else:

@@ -117,6 +117,21 @@ def get_perf_daily_stats(token, date_from, date_to):
     return rows
 
 
+def get_perf_sku_stats(token, date, campaign_ids):
+    """获取SKU级的推广费数据（新接口）"""
+    if not campaign_ids:
+        return {}
+    h = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    data = json.dumps({"date_from": date, "date_to": date, "campaignIds": campaign_ids})
+    resp = curl("POST", f"{PERF_BASE}/api/client/statistics/products/sku", h, data, timeout=30)
+    rows = resp.get('rows', []) if isinstance(resp, dict) else []
+    if rows:
+        log(f"SKU级推广费 ✅ {len(rows)}条")
+    else:
+        log(f"SKU级推广费 ⚠️ 无数据: {str(resp)[:100]}")
+    return {r.get('sku',''): float(r.get('expense',0) or 0) for r in rows}
+
+
 def get_campaign_products(token):
     """获取所有推广活动及其商品列表"""
     headers = {"Authorization": f"Bearer {token}"}
@@ -352,13 +367,19 @@ def main():
             camp_sku_count[cid] = camp_sku_count.get(cid, 0) + 1
         ad_by_campaign = {s['id']: s for s in ad_stats}
 
+        # 获取 SKU 级推广费（新接口，优先使用）
+        sku_ad_expenses = {}
+        if ad_stats:
+            running_cids = [s['id'] for s in ad_stats]
+            sku_ad_expenses = get_perf_sku_stats(perf_token, yesterday, running_cids)
+
         store6_db.init_db('store10')
         store6_db.save_summary('store10', yesterday, analytics_units, analytics_money,
             len(posts), sum(d['qty'] for _, d in sorted_skus),
             sum(d['revenue'] for _, d in sorted_skus), len(sorted_skus),
             ad_total_cost, sum(s['orders'] for s in ad_stats),
             sum(s['revenue'] for s in ad_stats), sum(1 for s in sku_orders if s in campaign_skus))
-        store6_db.save_sku_list('store10', yesterday, sorted_skus, campaign_skus, ad_by_campaign, camp_sku_count)
+        store6_db.save_sku_list('store10', yesterday, sorted_skus, campaign_skus, ad_by_campaign, camp_sku_count, sku_ad_expenses)
         store6_db.save_campaigns('store10', yesterday, ad_stats, campaign_names, camp_sku_count)
         log("数据库已保存 ✅")
 
