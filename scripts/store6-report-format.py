@@ -10,7 +10,6 @@ from datetime import datetime, timezone, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import config
-from lib.feishu import get_tenant_token, send_text
 import store6_db
 
 LOG_FILE = f"{config.LOG_DIR}/ozon-store6-report.log"
@@ -295,8 +294,7 @@ def main():
     report = "\n".join(lines)
     log(f"\n{report}")
 
-    # 7. 发飞书（已关闭）
-    log("✅ 飞书通知已关闭")
+
 
 if __name__ == '__main__':
     main()
